@@ -1,0 +1,151 @@
+using Unity.Cinemachine;
+using Unity.VisualScripting;
+using UnityEngine;
+using UnityEngine.Animations.Rigging;
+
+public class PlayerMove : MonoBehaviour
+{
+    PlayerShoot playerShoot;
+    Tps_Inputs tpsInputs;
+    CharacterController cc;
+    Animator _anim;
+
+    [Header("Camera Controls")]
+    public CinemachineCamera moveCamera;
+    public CinemachineCamera aimCamera;
+    public CinemachineCamera scopeCamera;
+    [SerializeField] CinemachineThirdPersonFollow shoulderFollow;
+    [SerializeField] private float shoulderTarget = 1;
+    public float shoulderSwitchSpeed = 10;
+
+    [Header("Movement Controls")]
+    public float moveSpeed = 3;
+    [SerializeField] private Vector2 moveInput;
+    [SerializeField] private Vector2 aimInput;
+
+    [Header("Rotation and Aiming")]
+    public Transform cameraFollow;
+    public Transform standPos;
+    public Transform crouchPos;
+    public float crouchSpeed = 8;
+    [SerializeField] private float xRotate, yRotate;   
+    public float mouseSensitivity = 0.25f;
+    public float yMin, yMax;
+    public Rig playerRig;
+
+    [Header("Player Physics")]
+    public Vector3 playerVelocity;
+    public Transform groundCheck;
+    public LayerMask groundlayer;
+    public float gravityForce = -10;
+    public float groundForce = -2;
+
+    [Header("Booleans")]
+    public bool isZoomedIn;
+    public bool isAiming;
+    public bool isScoped;
+    [SerializeField] private bool isGrounded;
+    [SerializeField] private bool isRunning;
+    [SerializeField] private bool isCrouching;
+    public bool rigSetupMode;
+
+    private void Awake()
+    {
+        tpsInputs = new Tps_Inputs();
+        cc = GetComponent<CharacterController>();
+        _anim = GetComponent<Animator>();
+        playerShoot = GetComponent<PlayerShoot>();
+
+        // Set camera priorities
+        moveCamera.Priority = 1;
+        aimCamera.Priority = 0;
+        scopeCamera.Priority = 0;
+    }
+
+    private void Start()
+    {
+       Cursor.lockState = CursorLockMode.Locked;
+       Cursor.visible = false;
+    }
+
+    private void OnEnable() => tpsInputs.Enable();
+    private void OnDisable() => tpsInputs.Disable();
+
+    private void Update()
+    {
+        isGrounded = Physics.CheckSphere(groundCheck.position, 0.2f, groundlayer);
+
+        isRunning = tpsInputs.Player.Run.IsPressed();
+
+        if (tpsInputs.Player.Crouch.triggered)
+            isCrouching = !isCrouching;
+
+        isAiming = tpsInputs.Player.Aim.IsPressed();
+        if (!rigSetupMode)
+        {
+            if (isAiming) _anim.SetLayerWeight(1, 1);
+            else _anim.SetLayerWeight(1, 0);
+        }
+
+        HandleInput();
+        HandleMovement();
+        HandleAiming();
+    }
+
+    private void LateUpdate()
+    {
+        Transform marker = isCrouching ? crouchPos : standPos;
+        cameraFollow.localPosition = Vector3.Lerp(cameraFollow.localPosition,
+            marker.localPosition, crouchSpeed * Time.deltaTime);
+        cameraFollow.localRotation = Quaternion.Euler(yRotate, 0, 0);
+        //cameraFollow.localEulerAngles = new Vector3(yRotate, 
+        //    cameraFollow.localEulerAngles.y, cameraFollow.localEulerAngles.z);
+        transform.rotation = Quaternion.Euler(0, xRotate, 0);
+    }
+    void HandleInput()
+    {
+        moveInput = tpsInputs.Player.Move.ReadValue<Vector2>();
+        aimInput = tpsInputs.Player.Camera.ReadValue<Vector2>();
+
+        
+        xRotate += aimInput.x * mouseSensitivity;
+        yRotate = Mathf.Clamp(yRotate - aimInput.y * mouseSensitivity, yMin, yMax);
+
+        if(tpsInputs.Player.ShoulderSwitch.triggered && isAiming)
+            shoulderTarget = shoulderTarget > 0.5f ? 0 : 1;
+    }
+
+    void HandleMovement()
+    {
+        Vector3 moveDirection = (transform.forward * moveInput.y 
+            + transform.right * moveInput.x) * moveSpeed;
+
+        // Set gravity for the player
+        if (!isGrounded) playerVelocity.y += gravityForce * Time.deltaTime;
+        else if (playerVelocity.y < 0) playerVelocity.y = groundForce;
+
+        moveDirection.y = playerVelocity.y;
+        cc.Move(moveDirection * Time.deltaTime);
+
+        // Player Animations
+        _anim.SetBool("Crouch", isCrouching);
+        _anim.SetFloat("XDirection", moveInput.x, 0.1f, Time.deltaTime);
+        _anim.SetFloat("ZDirection", moveInput.y, 0.1f, Time.deltaTime);
+    }
+
+    void HandleAiming()
+    {
+        playerRig.weight = isAiming ? 1 : 0;
+        shoulderFollow.CameraSide = Mathf.MoveTowards(shoulderFollow.CameraSide,
+            shoulderTarget, shoulderSwitchSpeed * Time.deltaTime);
+
+        if(isAiming && playerShoot.weaponID == 2)
+            isScoped = true;
+        else
+            isScoped = false;
+
+            moveCamera.Priority = isAiming ? 0 : 1;
+        aimCamera.Priority = isAiming && !isScoped ? 1 : -1;
+        scopeCamera.Priority = isAiming && isScoped ? 1 : 0;
+    }
+}
